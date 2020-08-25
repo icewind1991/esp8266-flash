@@ -15,7 +15,7 @@ pub struct FlashSpi(SPI0);
 pub struct DummyCS;
 
 impl Transfer<u8> for FlashSpi {
-    type Error = Void;
+    type Error = ESPFlashError;
 
     fn transfer<'w>(&mut self, _words: &'w mut [u8]) -> Result<&'w [u8], Self::Error> {
         unreachable!()
@@ -39,6 +39,27 @@ pub struct ESPFlash {
     spi: FlashSpi
 }
 
+pub enum ESPFlashError {
+    Err = 1,
+    Timeout = 2,
+}
+
+impl ESPFlashError {
+    fn from(result: u32) -> Result<(), Self> {
+        match result {
+            0 => Ok(()),
+            2 => Err(ESPFlashError::Timeout),
+            _ => Err(ESPFlashError::Err)
+        }
+    }
+}
+
+impl From<ESPFlashError> for Error<FlashSpi, DummyCS> {
+    fn from(err: ESPFlashError) -> Self {
+        Error::Spi(err)
+    }
+}
+
 impl ESPFlash {
     pub fn new(spi: SPI0) -> Self {
         // take ownership of SPI0 to ensure nobody else can mess with the spi
@@ -57,33 +78,36 @@ impl BlockDevice<u32, FlashSpi, DummyCS> for ESPFlash {
     fn erase_sectors(&mut self, addr: u32, amount: usize) -> Result<(), Error<FlashSpi, DummyCS>> {
         let start_sector = addr / SECTOR_SIZE;
         for i in 0..(amount as u32) {
-            unsafe {
-                SPIEraseSector(start_sector + i);
-            }
+            ESPFlashError::from(unsafe {
+                SPIEraseSector(start_sector + i)
+            })?;
         }
         Ok(())
     }
 
     fn erase_all(&mut self) -> Result<(), Error<FlashSpi, DummyCS>> {
-        unsafe {
-            SPIEraseChip();
-        }
+        ESPFlashError::from(unsafe {
+            SPIEraseChip()
+        })?;
+
         Ok(())
     }
 
     fn write_bytes(&mut self, addr: u32, data: &mut [u8]) -> Result<(), Error<FlashSpi, DummyCS>> {
-        unsafe {
-            SPIWrite(addr, data.as_ptr(), data.len() as u32);
-        }
+        ESPFlashError::from(unsafe {
+            SPIWrite(addr, data.as_ptr(), data.len() as u32)
+        })?;
+
         Ok(())
     }
 }
 
 impl Read<u32, FlashSpi, DummyCS> for ESPFlash {
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), Error<FlashSpi, DummyCS>> {
-        unsafe {
-            SPIRead(addr, buf.as_mut_ptr() as *mut _, buf.len() as u32);
-        }
+        ESPFlashError::from(unsafe {
+            SPIRead(addr, buf.as_mut_ptr() as *mut _, buf.len() as u32)
+        })?;
+
         Ok(())
     }
 }
