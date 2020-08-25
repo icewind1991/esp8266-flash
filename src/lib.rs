@@ -1,7 +1,89 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+#![no_std]
+
+use void::Void;
+use embedded_hal::blocking::spi::Transfer;
+use embedded_hal::digital::v2::OutputPin;
+use spi_memory::{BlockDevice, Error, Read};
+use xtensa_lx106_rt::rom::{SPIRead, SPIEraseSector, SPIEraseChip, SPIWrite};
+use esp8266::SPI0;
+
+const SECTOR_SIZE: u32 = 4096;
+
+pub struct FlashSpi(SPI0);
+
+/// Dummy chip select, since the onboard flash spi uses a hardware chip select
+pub struct DummyCS;
+
+impl Transfer<u8> for FlashSpi {
+    type Error = Void;
+
+    fn transfer<'w>(&mut self, _words: &'w mut [u8]) -> Result<&'w [u8], Self::Error> {
+        unreachable!()
+    }
+}
+
+impl OutputPin for DummyCS {
+    type Error = Void;
+
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        unreachable!()
+    }
+
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        unreachable!()
+    }
+}
+
+/// Access for the ESP8266 builtin flash
+pub struct ESPFlash {
+    spi: FlashSpi
+}
+
+impl ESPFlash {
+    pub fn new(spi: SPI0) -> Self {
+        // take ownership of SPI0 to ensure nobody else can mess with the spi
+        ESPFlash {
+            spi: FlashSpi(spi)
+        }
+    }
+
+    pub fn decompose(self) -> SPI0 {
+        self.spi.0
+    }
+}
+
+impl BlockDevice<u32, FlashSpi, DummyCS> for ESPFlash {
+    /// Erase 4K sectors
+    fn erase_sectors(&mut self, addr: u32, amount: usize) -> Result<(), Error<FlashSpi, DummyCS>> {
+        let start_sector = addr / SECTOR_SIZE;
+        for i in 0..(amount as u32) {
+            unsafe {
+                SPIEraseSector(start_sector + i);
+            }
+        }
+        Ok(())
+    }
+
+    fn erase_all(&mut self) -> Result<(), Error<FlashSpi, DummyCS>> {
+        unsafe {
+            SPIEraseChip();
+        }
+        Ok(())
+    }
+
+    fn write_bytes(&mut self, addr: u32, data: &mut [u8]) -> Result<(), Error<FlashSpi, DummyCS>> {
+        unsafe {
+            SPIWrite(addr, data.as_ptr(), data.len() as u32);
+        }
+        Ok(())
+    }
+}
+
+impl Read<u32, FlashSpi, DummyCS> for ESPFlash {
+    fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), Error<FlashSpi, DummyCS>> {
+        unsafe {
+            SPIRead(addr, buf.as_mut_ptr() as *mut _, buf.len() as u32);
+        }
+        Ok(())
     }
 }
