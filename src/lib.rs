@@ -1,17 +1,17 @@
 #![no_std]
 
-use void::Void;
 use embedded_hal::blocking::spi::Transfer;
 use embedded_hal::digital::v2::OutputPin;
-use spi_memory::{BlockDevice, Error, Read};
-use xtensa_lx106_rt::rom::{SPIRead, SPIEraseSector, SPIEraseChip, SPIWrite};
 use esp8266::SPI0;
+use spi_memory::{BlockDevice, Error, Read};
+use void::Void;
+use xtensa_lx106_rt::rom::{SPIEraseChip, SPIEraseSector, SPIRead, SPIWrite};
 
 const SECTOR_SIZE: u32 = 4096;
 
 pub struct FlashSpi(SPI0);
 
-/// Dummy chip select, since the onboard flash spi uses a hardware chip select
+/// Dummy chip select, since the onboard flash_example spi uses a hardware chip select
 pub struct DummyCS;
 
 impl Transfer<u8> for FlashSpi {
@@ -34,11 +34,12 @@ impl OutputPin for DummyCS {
     }
 }
 
-/// Access for the ESP8266 builtin flash
+/// Access for the ESP8266 builtin flash_example
 pub struct ESPFlash {
-    spi: FlashSpi
+    spi: FlashSpi,
 }
 
+#[derive(Debug)]
 pub enum ESPFlashError {
     Err = 1,
     Timeout = 2,
@@ -49,7 +50,7 @@ impl ESPFlashError {
         match result {
             0 => Ok(()),
             2 => Err(ESPFlashError::Timeout),
-            _ => Err(ESPFlashError::Err)
+            _ => Err(ESPFlashError::Err),
         }
     }
 }
@@ -63,9 +64,7 @@ impl From<ESPFlashError> for Error<FlashSpi, DummyCS> {
 impl ESPFlash {
     pub fn new(spi: SPI0) -> Self {
         // take ownership of SPI0 to ensure nobody else can mess with the spi
-        ESPFlash {
-            spi: FlashSpi(spi)
-        }
+        ESPFlash { spi: FlashSpi(spi) }
     }
 
     pub fn decompose(self) -> SPI0 {
@@ -78,25 +77,19 @@ impl BlockDevice<u32, FlashSpi, DummyCS> for ESPFlash {
     fn erase_sectors(&mut self, addr: u32, amount: usize) -> Result<(), Error<FlashSpi, DummyCS>> {
         let start_sector = addr / SECTOR_SIZE;
         for i in 0..(amount as u32) {
-            ESPFlashError::from(unsafe {
-                SPIEraseSector(start_sector + i)
-            })?;
+            ESPFlashError::from(unsafe { SPIEraseSector(start_sector + i) })?;
         }
         Ok(())
     }
 
     fn erase_all(&mut self) -> Result<(), Error<FlashSpi, DummyCS>> {
-        ESPFlashError::from(unsafe {
-            SPIEraseChip()
-        })?;
+        ESPFlashError::from(unsafe { SPIEraseChip() })?;
 
         Ok(())
     }
 
     fn write_bytes(&mut self, addr: u32, data: &mut [u8]) -> Result<(), Error<FlashSpi, DummyCS>> {
-        ESPFlashError::from(unsafe {
-            SPIWrite(addr, data.as_ptr(), data.len() as u32)
-        })?;
+        ESPFlashError::from(unsafe { SPIWrite(addr, data.as_ptr(), data.len() as u32) })?;
 
         Ok(())
     }

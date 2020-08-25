@@ -8,6 +8,21 @@ description = "A driver for the esp8266 onboard flash"
 [dependencies]
 xtensa-lx106-rt = "0.0.1"
 spi-memory = "0.2.0"
-embedded-hal = "0.2.4"
 esp8266 = "0.0.6"
+embedded-hal = "0.2.4"
 void = { version = "1.0.2", default-features = false }
+
+[dev-dependencies]
+esp8266-hal = "0.2.0"
+
+[profile.dev]
+lto = true
+incremental = false
+debug = false # debug adds frame pointers - which must be omitted
+codegen-units = 1
+
+[profile.release]
+lto = true
+incremental = false
+debug = false # debug adds frame pointers - which must be omitted
+codegen-units = 1
