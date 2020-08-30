@@ -5,9 +5,6 @@ use embedded_hal::digital::v2::OutputPin;
 use esp8266::SPI0;
 use spi_memory::{BlockDevice, Error, Read};
 use void::Void;
-use xtensa_lx106_rt::rom::{SPIEraseChip, SPIEraseSector, SPIRead, SPIWrite};
-
-const SECTOR_SIZE: u32 = 4096;
 
 pub struct FlashSpi(SPI0);
 
@@ -45,16 +42,6 @@ pub enum ESPFlashError {
     Timeout = 2,
 }
 
-impl ESPFlashError {
-    fn from(result: u32) -> Result<(), Self> {
-        match result {
-            0 => Ok(()),
-            2 => Err(ESPFlashError::Timeout),
-            _ => Err(ESPFlashError::Err),
-        }
-    }
-}
-
 impl From<ESPFlashError> for Error<FlashSpi, DummyCS> {
     fn from(err: ESPFlashError) -> Self {
         Error::Spi(err)
@@ -63,6 +50,8 @@ impl From<ESPFlashError> for Error<FlashSpi, DummyCS> {
 
 impl ESPFlash {
     pub fn new(spi: SPI0) -> Self {
+
+
         // take ownership of SPI0 to ensure nobody else can mess with the spi
         ESPFlash { spi: FlashSpi(spi) }
     }
@@ -70,26 +59,60 @@ impl ESPFlash {
     pub fn decompose(self) -> SPI0 {
         self.spi.0
     }
+
+    fn write_enable(&mut self) {
+        self.spi.0.spi_addr.write(|w| unsafe { w.bits(0) });
+        self.spi.0.spi_cmd.write(|w| w.spi_write_enable().set_bit());
+
+        while self.spi.0.spi_cmd.read().bits() > 0 {}
+    }
+
+    fn get_status(&mut self) -> u32 {
+        self.spi.0.spi_addr.write(|w| unsafe { w.bits(0) });
+        self.spi.0.spi_cmd.write(|w| w.spi_read_sr().set_bit());
+
+        while self.spi.0.spi_cmd.read().bits() > 0 {}
+
+        self.spi.0.spi_rd_status.read().bits()
+    }
 }
 
 impl BlockDevice<u32, FlashSpi, DummyCS> for ESPFlash {
     /// Erase 4K sectors
     fn erase_sectors(&mut self, addr: u32, amount: usize) -> Result<(), Error<FlashSpi, DummyCS>> {
-        let start_sector = addr / SECTOR_SIZE;
-        for i in 0..(amount as u32) {
-            ESPFlashError::from(unsafe { SPIEraseSector(start_sector + i) })?;
+        self.write_enable();
+        for i in 0..amount {
+            self.spi.0.spi_addr.write(|w| unsafe { w.address().bits(addr + i as u32) });
+            self.spi.0.spi_cmd.write(|w| w.spi_se().set_bit());
+
+            while self.spi.0.spi_cmd.read().bits() > 0 {}
+
+            while self.get_status() & 1 > 0 {}
         }
+
         Ok(())
     }
 
     fn erase_all(&mut self) -> Result<(), Error<FlashSpi, DummyCS>> {
-        ESPFlashError::from(unsafe { SPIEraseChip() })?;
+        self.spi.0.spi_cmd.write(|w| w.spi_ce().set_bit());
+
+        while self.spi.0.spi_cmd.read().bits() > 0 {}
 
         Ok(())
     }
 
     fn write_bytes(&mut self, addr: u32, data: &mut [u8]) -> Result<(), Error<FlashSpi, DummyCS>> {
-        ESPFlashError::from(unsafe { SPIWrite(addr, data.as_ptr(), data.len() as u32) })?;
+        self.write_enable();
+        // todo 64 byte chunks
+        for (i, byte) in data.iter().enumerate() {
+            self.spi.0.spi_addr.write(|w| unsafe { w.address().bits(addr + i as u32).size().bits(1) });
+            self.spi.0.spi_w0.write(|w| unsafe { w.bits(*byte as u32) });
+            self.spi.0.spi_cmd.write(|w| w.spi_pp().set_bit());
+
+            while self.spi.0.spi_cmd.read().bits() > 0 {}
+
+            while self.get_status() & 1 > 0 {}
+        }
 
         Ok(())
     }
@@ -97,9 +120,15 @@ impl BlockDevice<u32, FlashSpi, DummyCS> for ESPFlash {
 
 impl Read<u32, FlashSpi, DummyCS> for ESPFlash {
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), Error<FlashSpi, DummyCS>> {
-        ESPFlashError::from(unsafe {
-            SPIRead(addr, buf.as_mut_ptr() as *mut _, buf.len() as u32)
-        })?;
+        // todo 64 byte chunks
+        for (i, byte) in buf.iter_mut().enumerate() {
+            self.spi.0.spi_addr.write(|w| unsafe { w.address().bits(addr + i as u32).size().bits(1) });
+            self.spi.0.spi_cmd.write(|w| w.spi_read().set_bit());
+
+            while self.spi.0.spi_cmd.read().bits() > 0 {}
+
+            *byte = self.spi.0.spi_w0.read().bits() as u8;
+        }
 
         Ok(())
     }

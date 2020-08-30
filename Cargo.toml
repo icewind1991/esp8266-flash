@@ -6,14 +6,14 @@ edition = "2018"
 description = "A driver for the esp8266 onboard flash"
 
 [dependencies]
-xtensa-lx106-rt = "0.0.1"
 spi-memory = "0.2.0"
-esp8266 = "0.0.6"
+esp8266 = "0.1.1"
 embedded-hal = "0.2.4"
 void = { version = "1.0.2", default-features = false }
 
 [dev-dependencies]
-esp8266-hal = "0.2.0"
+esp8266-hal = "0.3.2"
+xtensa-lx106-rt = "0.1.0"
 
 [profile.dev]
 lto = true
